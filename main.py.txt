@@ -1,0 +1,177 @@
+import sys
+import random
+from PySide6.QtWidgets import QApplication, QWidget, QLabel, QMenu
+from PySide6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, QTimer, QRect, QSequentialAnimationGroup, QParallelAnimationGroup
+from PySide6.QtGui import QPixmap, QAction, QFont
+
+TEXTS = ["哎呀！", "好无聊呀~", "戳我干嘛？", "嘿嘿，你好！", "别戳啦！", "要贴贴吗？", "你在看我吗？", "今天天气真好！"]
+
+class DesktopPet(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.scale_factor = 1.0
+        self.base_width = 200
+        self.original_pos = None
+
+        self.pet_pixmap = QPixmap("pet.png")
+        if self.pet_pixmap.isNull():
+            print("错误：找不到 pet.png，请确保图片和代码在同一个文件夹！")
+            sys.exit(1)
+
+        self.pet_label = QLabel(self)
+        self.update_pet_size()
+
+        self.bubble = QLabel(self)
+        self.bubble.setStyleSheet("background-color: rgba(255, 255, 255, 0.9); color: black; border-radius: 10px; padding: 8px; border: 1px solid #ccc;")
+        self.bubble.setFont(QFont("微软雅黑", 12))
+        self.bubble.hide()
+        self.drag_pos = QPoint()
+
+    def set_mask_for_image(self):
+        if not self.pet_pixmap.isNull():
+            mask = self.pet_pixmap.createHeuristicMask(True)
+            self.setMask(mask)
+
+    def update_pet_size(self):
+        new_width = int(self.base_width * self.scale_factor)
+        new_height = int(self.base_width * self.scale_factor * (self.pet_pixmap.height() / self.pet_pixmap.width()))
+        scaled_pixmap = self.pet_pixmap.scaled(new_width, new_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.pet_label.setPixmap(scaled_pixmap)
+        self.pet_label.resize(new_width, new_height)
+        self.resize(new_width, new_height)
+        self.set_mask_for_image()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self.trigger_interaction()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton:
+            self.move(event.globalPosition().toPoint() - self.drag_pos)
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y() / 120
+        if delta > 0:
+            self.scale_factor = min(self.scale_factor + 0.1, 2.5)
+        else:
+            self.scale_factor = max(self.scale_factor - 0.1, 0.5)
+        self.update_pet_size()
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        menu.setStyleSheet("QMenu { background-color: white; color: black; } QMenu::item:selected { background-color: #ddd; }")
+        
+        size_menu = menu.addMenu("调整大小")
+        size_1 = QAction("1.0x", self)
+        size_1.triggered.connect(lambda: self.set_scale(1.0))
+        size_menu.addAction(size_1)
+        size_15 = QAction("1.5x", self)
+        size_15.triggered.connect(lambda: self.set_scale(1.5))
+        size_menu.addAction(size_15)
+        size_2 = QAction("2.0x", self)
+        size_2.triggered.connect(lambda: self.set_scale(2.0))
+        size_menu.addAction(size_2)
+
+        top_action = QAction("切换置顶", self)
+        top_action.triggered.connect(self.toggle_top)
+        menu.addAction(top_action)
+
+        exit_action = QAction("退出程序", self)
+        exit_action.triggered.connect(self.close)
+        menu.addAction(exit_action)
+        menu.exec(event.globalPos())
+
+    def set_scale(self, factor):
+        self.scale_factor = factor
+        self.update_pet_size()
+
+    def toggle_top(self):
+        flags = self.windowFlags()
+        if flags & Qt.WindowStaysOnTopHint:
+            self.setWindowFlags(flags ^ Qt.WindowStaysOnTopHint)
+        else:
+            self.setWindowFlags(flags | Qt.WindowStaysOnTopHint)
+        self.show()
+
+    def trigger_interaction(self):
+        if hasattr(self, 'anim_group') and self.anim_group.state() == QSequentialAnimationGroup.Running:
+            self.anim_group.stop()
+            if self.original_pos:
+                self.move(self.original_pos)
+            self.update_pet_size()
+
+        self.original_pos = self.pos()
+        current_rect = self.geometry()
+        x, y, w, h = current_rect.x(), current_rect.y(), current_rect.width(), current_rect.height()
+        self.anim_group = QSequentialAnimationGroup(self)
+
+        jump = QPropertyAnimation(self, b"geometry")
+        jump.setDuration(300)
+        jump.setStartValue(current_rect)
+        jump.setEndValue(QRect(x, y - 50, w, h))
+        jump.setEasingCurve(QEasingCurve.OutQuad)
+        
+        jump_down = QPropertyAnimation(self, b"geometry")
+        jump_down.setDuration(300)
+        jump_down.setStartValue(QRect(x, y - 50, w, h))
+        jump_down.setEndValue(QRect(x, y, w, h))
+        jump_down.setEasingCurve(QEasingCurve.InQuad)
+        self.anim_group.addAnimation(jump)
+        self.anim_group.addAnimation(jump_down)
+
+        flatten_group = QParallelAnimationGroup(self)
+        flatten = QPropertyAnimation(self, b"geometry")
+        flatten.setDuration(200)
+        flatten.setStartValue(QRect(x, y, w, h))
+        flatten.setEndValue(QRect(x + 10, y + 10, w - 20, h - 10))
+        flatten.setEasingCurve(QEasingCurve.OutCubic)
+        flatten_group.addAnimation(flatten)
+
+        bounce_back = QPropertyAnimation(self, b"geometry")
+        bounce_back.setDuration(200)
+        bounce_back.setStartValue(QRect(x + 10, y + 10, w - 20, h - 10))
+        bounce_back.setEndValue(QRect(x, y, w, h))
+        bounce_back.setEasingCurve(QEasingCurve.OutBounce)
+        flatten_group.addAnimation(bounce_back)
+        self.anim_group.addAnimation(flatten_group)
+
+        for _ in range(3):
+            shake1 = QPropertyAnimation(self, b"geometry")
+            shake1.setDuration(80)
+            shake1.setStartValue(QRect(x, y, w, h))
+            shake1.setEndValue(QRect(x - 15, y, w, h))
+            shake2 = QPropertyAnimation(self, b"geometry")
+            shake2.setDuration(80)
+            shake2.setStartValue(QRect(x - 15, y, w, h))
+            shake2.setEndValue(QRect(x + 15, y, w, h))
+            self.anim_group.addAnimation(shake1)
+            self.anim_group.addAnimation(shake2)
+        
+        reset = QPropertyAnimation(self, b"geometry")
+        reset.setDuration(80)
+        reset.setStartValue(QRect(x + 15, y, w, h))
+        reset.setEndValue(QRect(x, y, w, h))
+        self.anim_group.addAnimation(reset)
+
+        self.show_random_text()
+        self.anim_group.start()
+
+    def show_random_text(self):
+        text = random.choice(TEXTS)
+        self.bubble.setText(text)
+        self.bubble.adjustSize()
+        pet_geo = self.geometry()
+        bubble_x = pet_geo.width() // 2 - self.bubble.width() // 2
+        bubble_y = -self.bubble.height() - 10
+        self.bubble.move(bubble_x, bubble_y)
+        self.bubble.show()
+        QTimer.singleShot(3000, self.bubble.hide)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    pet = DesktopPet()
+    pet.show()
+    sys.exit(app.exec())
